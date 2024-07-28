@@ -1,0 +1,144 @@
+-- Crear Pedido
+
+DELIMITER $$
+
+CREATE PROCEDURE PROC_PEDIDO_CREAR(
+    IN _ID_MESA INT,
+    IN _ID_TRABAJADOR INT,
+    IN _F_PEDIDO DATETIME,
+    IN _ESTADO CHAR(1),
+    IN _DETALLES JSON,
+    OUT _ID_PEDIDO INT,
+    OUT __ICON VARCHAR(10),
+    OUT __MESSAGE_TEXT VARCHAR(300),
+    OUT __STATUS_CODE CHAR(3)
+)
+BEGIN
+    DECLARE _TOTAL DECIMAL(10,2) DEFAULT 0.00;
+    DECLARE _PRECIO_UNITARIO DECIMAL(10,2);
+    DECLARE _CANTIDAD INT;
+    DECLARE _ID_PLATO INT;
+    DECLARE _DETALLE JSON;
+    DECLARE _INDEX INT DEFAULT 0;
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET __ICON = 'error';
+        SET __MESSAGE_TEXT = 'HA OCURRIDO UN ERROR';
+        SET __STATUS_CODE = '500';
+    END;
+
+    START TRANSACTION;
+
+    -- Crear el pedido
+    INSERT INTO pedido (ID_MESA, ID_TRABAJADOR, F_PEDIDO, ESTADO)
+    VALUES (_ID_MESA, _ID_TRABAJADOR, _F_PEDIDO, _ESTADO);
+
+    -- Obtener el ID del pedido recién creado
+    SET _ID_PEDIDO = LAST_INSERT_ID();
+
+    -- Procesar cada detalle en la lista de detalles
+    WHILE _INDEX < JSON_LENGTH(_DETALLES) DO
+        SET _DETALLE = JSON_EXTRACT(_DETALLES, CONCAT('$[', _INDEX, ']'));
+        SET _ID_PLATO = JSON_UNQUOTE(JSON_EXTRACT(_DETALLE, '$.ID_PLATO'));
+        SET _CANTIDAD = JSON_UNQUOTE(JSON_EXTRACT(_DETALLE, '$.CANTIDAD'));
+
+        -- Obtener el precio del plato
+        SELECT PRECIO INTO _PRECIO_UNITARIO FROM plato WHERE ID_PLATO = _ID_PLATO;
+
+        -- Calcular el total
+        SET _TOTAL = _TOTAL + (_PRECIO_UNITARIO * _CANTIDAD);
+
+        -- Insertar el detalle del pedido
+        INSERT INTO detalle_pedido (ID_PEDIDO, ID_PLATO, CANTIDAD, PRECIO)
+        VALUES (_ID_PEDIDO, _ID_PLATO, _CANTIDAD, _PRECIO_UNITARIO);
+
+        -- Incrementar el índice
+        SET _INDEX = _INDEX + 1;
+    END WHILE;
+
+    -- Actualizar el total en el pedido
+    UPDATE pedido SET TOTAL = _TOTAL WHERE ID_PEDIDO = _ID_PEDIDO;
+
+    COMMIT;
+
+    SET __ICON = 'success';
+    SET __MESSAGE_TEXT = 'Pedido creado exitosamente';
+    SET __STATUS_CODE = '201';
+END $$
+
+DELIMITER ;
+
+
+
+--LISTAR PEDIDOS
+DELIMITER $$
+
+CREATE PROCEDURE PROC_PEDIDOS_LIST()
+BEGIN
+    SELECT 
+        p.ID_PEDIDO,
+        p.ID_MESA,
+        m.NUMERO AS NUMERO_MESA,
+        p.ID_TRABAJADOR,
+        t.ID_PERSONA,
+        pe.NOMBRES AS NOMBRE_TRABAJADOR,
+        p.F_PEDIDO,
+        p.ESTADO,
+        p.TOTAL
+    FROM
+        pedido p
+        INNER JOIN mesa m ON p.ID_MESA = m.ID_MESA
+        INNER JOIN trabajador t ON p.ID_TRABAJADOR = t.ID_TRABAJADOR
+        INNER JOIN persona pe ON t.ID_PERSONA = pe.ID_PERSONA
+    ORDER BY
+        p.F_PEDIDO DESC;
+END $$
+
+DELIMITER ;
+
+
+
+--LISTAR UN SOLO PEDIDO
+DELIMITER $$
+
+CREATE PROCEDURE PROC_PEDIDO_DETALLE(
+    IN _ID_PEDIDO INT
+)
+BEGIN
+    SELECT 
+        dp.ID_DETALLE_PEDIDO,
+        dp.ID_PEDIDO,
+        dp.ID_PLATO,
+        pl.NOMBRE AS NOMBRE_PLATO,
+        dp.CANTIDAD,
+        dp.PRECIO,
+        (dp.CANTIDAD * dp.PRECIO) AS SUBTOTAL
+    FROM
+        detalle_pedido dp
+        INNER JOIN plato pl ON dp.ID_PLATO = pl.ID_PLATO
+    WHERE
+        dp.ID_PEDIDO = _ID_PEDIDO
+    ORDER BY
+        dp.ID_DETALLE_PEDIDO ASC;
+END $$
+
+DELIMITER ;
+
+
+
+--CAMBIAR ESTADO DE PEDIDO
+DELIMITER $$
+
+CREATE PROCEDURE PROC_CAMBIAR_ESTADO_PEDIDO(
+    IN _ID_PEDIDO INT,
+    IN _ESTADO CHAR(1)
+)
+BEGIN
+    UPDATE pedido
+    SET ESTADO = _ESTADO
+    WHERE ID_PEDIDO = _ID_PEDIDO;
+END $$
+
+DELIMITER ;
